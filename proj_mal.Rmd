@@ -1,0 +1,156 @@
+---
+title: "R Notebook"
+output: pdf_document
+---
+
+# 0. Packages
+```{r}
+library(ElemStatLearn)
+library(dplyr)
+library(RColorBrewer)
+library(ggplot2)
+library(cowplot)
+library(e1071) # Naie Bayes
+library(caret) # Matrice de confusion
+library(pROC) 
+```
+
+# 1. Données
+```{r}
+data(zip.train)
+data(zip.test)
+```
+
+```{r}
+dim(zip.train)
+dim(zip.test)
+
+zip.train[1:10,1:10]
+zip.test[1:10,1:10]
+```
+Première colonne: les digit
+256 autres colonnes = valeures des pixels (imgage 16x16 = 256 pixels)
+
+# 2. Préparation des data.frame
+```{r}
+train = as.data.frame(zip.train)
+colnames(train)[1] = "Digit"
+test = as.data.frame(zip.test)
+colnames(test)[1] = "Digit"
+rm(zip.train)
+rm(zip.test)
+```
+
+
+```{r}
+#apply(train,2, class)
+#apply(test,2, class)
+```
+
+```{r}
+train$Digit = as.factor(train$Digit)
+test$Digit = as.factor(test$Digit)
+```
+
+
+```{r}  
+plot_grid(
+  ggplot(data = train, aes(x = train$Digit)) + geom_bar( fill = brewer.pal(n = 10, name = "Set3")) +     xlab("Digits dans le train"),
+  ggplot(data = test, aes(x = test$Digit)) + geom_bar( fill = brewer.pal(n = 10, name = "Set3")) +       xlab("Digits dans le test")
+          )
+```
+## 2.1 Choix aléatoire des deux digits à prédire
+```{r}
+#set.seed(2) # POur que les valeurs aléatoires ne changent pas au moins le temps de commencer le code
+
+digits_chosen  = sample(seq(from=0, to= 9, by=1), 2, replace = F)
+```
+
+## 2.2 Data frame final pour entrainer les modèles
+```{r}
+train.2d = subset(train, (Digit %in% c(digits_chosen)))
+test.2d = subset(test, (Digit %in% c(digits_chosen)))  
+train.2d$Digit = as.factor(as.character(train.2d$Digit))
+test.2d$Digit = as.factor(as.character(test.2d$Digit))
+rm(train)
+rm(test)
+```
+
+
+
+```{r}  
+plot_grid(
+  ggplot(data = train.2d, aes(x = train.2d$Digit)) + geom_bar(fill = c("orange", "steelblue")) + xlab("Digits dans le train"),
+  ggplot(data = test.2d, aes(x = test.2d$Digit)) + geom_bar(fill = c("orange", "steelblue")) + xlab("Digits dans le test")
+          )
+```
+# 3. Classifiers
+
+
+## 3.1 Naive Bayes
+```{r}
+# Entrainement du modèle
+mod.NB = e1071::naiveBayes(Digit ~ ., data = train.2d)
+
+# On prédit les données de test avec le modèle obtenu
+pred.NB = predict(mod.NB, subset(test.2d, select = -Digit))
+
+# Matrice de confusion
+confusionMatrix(pred.NB, test.2d$Digit)
+fourfoldplot(table(pred.NB, test.2d$Digit), color = c("red","blue"))
+```
+
+```{r}
+# Visualisation des mauvaises predictions
+NB.errors = cbind(test.2d[which(test.2d$Digit != pred.NB),], pred.NB[which(test.2d$Digit != pred.NB)])
+colnames(NB.errors)[c(1,258)] = c("Label","Pred")
+par(mfrow=c(3,4))
+for(i in 1:dim(NB.errors)[1]){
+image(zip2image(as.matrix(NB.errors[i,2:257])), col=gray(256:0/256), zlim=c(0,1), xlab="", ylab="",xaxt="n",yaxt="n")
+}
+```
+```{r}
+NB.errors[,c(1,258)]
+```
+
+```{r}
+library(MASS)
+mod.lda = lda(Digit ~ ., data = train.2d)
+pred.lda = predict(mod.lda, subset(test.2d, select = -Digit))
+confusionMatrix(pred.lda$class, test.2d$Digit)
+```
+
+
+
+```{r}
+mod.qda = qda(Digit ~ ., data = train.2d)
+pred.qda = predict(mod.qda, subset(test.2d, select = -Digit))
+confusionMatrix(pred.qda$class, test.2d$Digit)
+```
+```{r}
+library(class)
+mod.knn = as.factor(knn(train=train.2d[-c(1)], test=test.2d[-c(1)], cl=train.2d$Digit, k=5))
+cm.knn = confusionMatrix(mod.knn, test.2d$Digit)
+cm.knn$table
+cm.knn$overall[1]
+```
+
+```{r}
+library(tree)
+mod.tree = tree(Digit~. , data = train.2d)
+pred.tree = as.factor(predict(mod.tree, newdata=test.2d[-c(1)], type="class"))
+cm.tree = confusionMatrix(pred.tree, test.2d$Digit)
+cm.tree$table
+cm.tree$overall[1]
+```
+
+```{r}
+install.packages("tree")
+```
+
+
+```{r}
+version
+```
+
+

@@ -1,0 +1,206 @@
+---
+title: 'Machine Learning Project : Digits prediction'
+author: "Guedj O. and Marcoux Pépin T."
+output:
+  pdf_document: default
+  html_notebook: default
+---
+
+
+```{r setup, include=FALSE}
+library(ElemStatLearn)
+library(dplyr)
+library(RColorBrewer)
+library(ggplot2)
+library(cowplot)
+library(e1071) # Naive Bayes
+library(caret) # Matrice de confusion
+library(MASS)
+library(class)
+library(caret)
+library(tree)
+library(pROC) 
+library(ipred)
+library(randomForest)
+```
+
+# 1. Import des données
+```{r}
+data(zip.train)
+data(zip.test)
+dim(zip.train)
+dim(zip.test)
+```
+
+La première colonne correspond aux labels des données: les digits.
+Les 256 autres colonnes correspondent aux valeurs des pixels (image 16x16 = 256 pixels).
+
+# 2. Préparation des data frames
+```{r}
+train = as.data.frame(zip.train)
+colnames(train)[1] = "Digit"
+test = as.data.frame(zip.test)
+colnames(test)[1] = "Digit"
+train$Digit = as.factor(train$Digit)
+test$Digit = as.factor(test$Digit)
+```
+
+
+```{r, include = F}  
+plot_grid(
+  ggplot(data = train, aes(x = train$Digit)) + geom_bar( fill = brewer.pal(n = 10, name = "Set3")) +     xlab("Classes repartition on training data set"),
+  ggplot(data = test, aes(x = test$Digit)) + geom_bar( fill = brewer.pal(n = 10, name = "Set3")) +       xlab("Classes repartition on testing data set")
+          )
+```
+
+## 2.1 Choix aléatoire des deux digits à prédire
+```{r}
+set.seed(123) 
+digits_chosen  = sample(seq(from=0, to= 9, by=1), 2, replace = F)
+cat("Les deux chiffres choisis sont",digits_chosen[1],"et",digits_chosen[2])
+```
+On sélectionne les deux digits à prédire aléatoirement afin de ne pas faire d'hypothèse à priori sur la capacité des différents modèles à séparer les deux classes.
+Par exemple, la distinction entre 1 et 7 est complexe alors que celle entre 1 et 0 est relativement simple.
+
+## 2.2 Data frame final pour entraîner les modèles
+On crée un `train` et un `test` contennant uniquement les observations des digits choisis.
+```{r}
+train.2d = subset(train, (Digit %in% c(digits_chosen)))
+test.2d = subset(test, (Digit %in% c(digits_chosen)))  
+train.2d$Digit = as.factor(as.character(train.2d$Digit))
+test.2d$Digit = as.factor(as.character(test.2d$Digit))
+```
+
+On vérifie que les observations des deux digits choisis sont équitablement représentés dans le `train` et dans le `test`.
+```{r}  
+par(mfrow = c(1,2))
+barplot(table(train.2d$Digit), col = c("orange", "steelblue"), xlab = "train")
+barplot(table(test.2d$Digit), col = c("orange", "steelblue"), xlab = "test")
+title(main="Répartition des classes choisies\n",outer=TRUE,line=-2)
+    
+```
+
+# 3. Classifiers
+
+## 3.1 Naive Bayes
+```{r}
+mod.NB = naiveBayes(Digit ~ ., data = train.2d)
+pred.NB = predict(mod.NB, subset(test.2d, select = -Digit))
+cm.NB = confusionMatrix(pred.NB, test.2d$Digit)
+cm.NB$table
+acc.NB = cm.NB$overall[1]
+acc.NB
+```
+
+## 3.2 Linear Discriminant Analysis
+
+```{r}
+mod.lda = lda(Digit ~ ., data = train.2d)
+pred.lda = predict(mod.lda, subset(test.2d, select = -Digit))
+cm.lda = confusionMatrix(pred.lda$class, test.2d$Digit)
+cm.lda$table
+acc.LDA = cm.lda$overall[1]
+acc.LDA
+```
+
+## 3.3 Quadratic Discriminant Analysis
+
+```{r}
+#mod.qda = qda(Digit ~ ., data=train.2d)
+#pred.qda = predict(mod.qda, subset(test.2d, select = -Digit))
+#confusionMatrix(pred.qda$class, test.2d$Digit)
+```
+
+## 3.4 k NN
+
+###  Cross-validation sur l'hyperparamètre k
+```{r}
+trControl <- trainControl(method  = "cv",
+                          number  = 5)
+fit <- train(Digit ~ .,
+             method     = "knn",
+             tuneGrid   = expand.grid(k = 1:10),
+             trControl  = trControl,
+             metric     = "Accuracy",
+             data       = train.2d)
+fit
+acc.knn = max(fit$results$Accuracy)
+acc.knn
+```
+```{r}
+plot.knn = data.frame(k = fit$results$k, acc = fit$results$Accuracy)
+ggplot(plot.knn, aes(x = k, y = acc)) +geom_point(col = "steelblue") + geom_line(col = "orange") +theme_minimal()
+```
+
+
+Remarque : A scores de précisions égaux, la fonction train a tendance à retenir le modèle le plus complexe, ce qui n'est pas forcement le choix optimal.
+
+## 3.5 Decision Tree
+```{r}
+mod.tree = tree(Digit~. , data = train.2d)
+pred.tree = as.factor(predict(mod.tree, newdata=test.2d[-c(1)], type="class"))
+cm.tree = confusionMatrix(pred.tree, test.2d$Digit)
+cm.tree$table
+acc.tree = cm.tree$overall[1]
+acc.tree
+```
+
+
+# 3.6 Bagging
+```{r}
+mod.bag = bagging(Digit~., data=train.2d, coob=T)
+pred.bag = as.factor(predict(mod.bag, newdata=test.2d[,-c(1)], type="class"))
+cm.bag = confusionMatrix(pred.bag, test.2d$Digit)
+cm.bag$table
+acc.bag = cm.bag$overall[1]
+acc.bag
+```
+
+# 3.7 Random Forest
+
+## 3.7.1 Modèle
+```{r}
+mod.rf = randomForest(train.2d[,-c(1)], train.2d$Digit)
+pred.rf = as.factor(predict(mod.rf, newdata=test.2d[,-c(1)], type="class"))
+cm.rf = confusionMatrix(pred.rf, test.2d$Digit)
+cm.rf$table
+acc.rf = cm.rf$overall[1]
+acc.rf
+```
+## 3.7.2 ROC et AUC
+```{r}
+roc.rf = roc(train.2d$Digit,mod.rf$votes[,2] )
+plot(roc.rf)
+auc(roc.rf)
+```
+
+## 3.6 
+
+# 4 Résumé des performances
+```{r}
+acc.df = data.frame(models = c("N.Bayes", "LDA", "Knn", "Tree","Bagging","Random Forest"),
+accuraccy = c(acc.NB,acc.LDA,acc.knn,acc.tree,acc.bag,acc.rf))
+ggplot(acc.df, aes(models, accuraccy))+ geom_point() +xlab("") 
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
